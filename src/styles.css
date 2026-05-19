@@ -1,0 +1,255 @@
+:root {
+    --bg-color: #080808;
+    --gold: #C9A96E;
+    --text-color: #F0EBE0;
+    --muted-color: #8A8070;
+    --font-serif: "Cormorant Garamond", serif;
+    --font-sans: "DM Sans", sans-serif;
+    --transition-speed: 0.8s;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+}
+
+body {
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    font-family: var(--font-sans);
+    overflow: hidden;
+    width: 100vw;
+    height: 100vh;
+}
+
+#main-container {
+    flex: 1;
+    width: 100%;
+    height: 100%;
+    position: relative;
+}
+
+/* Typography */
+h1, h2, h3, .serif {
+    font-family: var(--font-serif);
+    font-weight: 300;
+    letter-spacing: 0.05em;
+}
+
+.italic {
+    font-style: italic;
+}
+
+/* Common Components */
+.btn-gold {
+    background: transparent;
+    border: 1px solid var(--gold);
+    color: var(--gold);
+    padding: 12px 32px;
+    font-family: var(--font-serif);
+    font-size: 1.1rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    position: relative;
+    overflow: hidden;
+}
+
+.btn-gold:hover {
+    background: var(--gold);
+    color: var(--bg-color);
+}
+
+.hidden {
+    display: none !important;
+}
+
+/* Transition Overlay */
+#transition-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(8, 8, 8, 0.97);
+    z-index: 1000;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity var(--transition-speed) ease;
+}
+
+#transition-overlay.active {
+    opacity: 1;
+    pointer-events: all;
+}
+
+/* Custom Cursor */
+#custom-cursor {
+    width: 20px;
+    height: 20px;
+    border: 1px solid var(--gold);
+    border-radius: 50%;
+    position: fixed;
+    pointer-events: none;
+    z-index: 9999;
+    transform: translate(-50%, -50%);
+    transition: width 0.3s, height 0.3s, background 0.3s;
+}
+
+@media (max-width: 768px) {
+    #custom-cursor {
+        display: none;
+    }
+}
+
+/* Typewriter Animation */
+.typewriter {
+    overflow: hidden;
+    border-right: .15em solid var(--gold);
+    white-space: nowrap;
+    margin: 0 auto;
+    letter-spacing: .15em;
+    animation: 
+      typing 3.5s steps(40, end),
+      blink-caret .75s step-end infinite;
+}
+
+@keyframes typing {
+    from { width: 0 }
+    to { width: 100% }
+}
+
+@keyframes blink-caret {
+    from, to { border-color: transparent }
+    50% { border-color: var(--gold); }
+}
+
+/* Screen Transitions — transparent so camera shows through */
+.screen {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    opacity: 0;
+    transform: translateY(20px);
+    transition: opacity 0.8s ease, transform 0.8s ease;
+    background: transparent;
+}
+
+.screen.active {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+/* Gold Thread Accent */
+.gold-thread {
+    position: absolute;
+    background: linear-gradient(90deg, transparent, var(--gold), transparent);
+    height: 1px;
+    width: 100%;
+    top: 50%;
+    left: 0;
+    opacity: 0.25;
+    pointer-events: none;
+}
+
+/* ═══════════════════════════════════════════════════════
+   VISUAL LAYER STACK
+   1. #camera-bg-wrapper   z-index: 0   (camera video)
+   2. #camera-grain-canvas z-index: 1   (grain fallback)
+   3. #camera-dark-overlay z-index: 2   (dark veil 0.65)
+   4. #app-root            z-index: 10  (all UI)
+   5. #transition-overlay  z-index: 1000
+   6. #custom-cursor       z-index: 9999
+   ═══════════════════════════════════════════════════════ */
+
+/* Layer 1 — Camera background */
+#camera-bg-wrapper {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    opacity: 0; /* Camera module fades this in on permission grant */
+    pointer-events: none;
+}
+
+#camera-bg-video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+/* Layer 2 — Grain fallback (no camera) */
+#camera-grain-canvas {
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+    width: 100%;
+    height: 100%;
+    opacity: 0; /* Camera module sets this when camera is denied */
+    pointer-events: none;
+}
+
+/* Layer 3 — Persistent dark overlay */
+#camera-dark-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 2;
+    background: rgba(8, 8, 8, 0.65);
+    pointer-events: none;
+}
+
+/* Layer 4 — App root (all screens) */
+#app-root {
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Screens are transparent so camera shows through */
+body.experience-locked * {
+    pointer-events: none !important;
+}
+
+body.experience-locked #custom-cursor {
+    opacity: 0.3;
+}
+
+/* Flow state indicator (data attribute for debugging) */
+body[data-flow-state="PLAYING_NARRATION"] #narration-controls {
+    /* controls shown by FlowController — kept hidden via .hidden class until ready */
+}
+
+/* ── Global Exit Button (×) ─────────────────────────────────────
+   Must remain clickable even when FlowController locks the body.
+   The experience-locked rule blanket-disables pointer-events; we
+   restore them here specifically for the exit affordance.          */
+#lore-exit-btn {
+    pointer-events: all !important;
+}
+
+/* ── Exit overlay — sits above all screens, below error overlay ──
+   Both the overlay container AND every child element need explicit
+   pointer-events restoration because `body.experience-locked * { none !important }`
+   targets all descendants. An inline `pointer-events: all` cannot win against
+   a stylesheet !important rule. We use higher-specificity ID+* selectors here
+   (specificity 101 vs 11) so these rules always win. */
+#lore-exit-overlay {
+    font-family: var(--font-serif);
+    pointer-events: all !important;
+}
+
+#lore-exit-overlay * {
+    pointer-events: all !important;
+}

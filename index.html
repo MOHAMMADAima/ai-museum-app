@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>LORE — Narrative Resurrection Engine</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400;1,500;1,600;1,700&family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/src/styles.css">
+</head>
+<body>
+
+    <!--
+      ═══════════════════════════════════════
+      LAYER 1 — Camera background (base)
+      Persistent across ALL screens.
+      Opacity controlled by Camera module.
+      ═══════════════════════════════════════
+    -->
+    <div id="camera-bg-wrapper">
+        <video
+            id="camera-bg-video"
+            autoplay
+            muted
+            playsinline
+            aria-hidden="true"
+        ></video>
+    </div>
+
+    <!--
+      ═══════════════════════════════════════
+      LAYER 2 — Grain fallback (no camera)
+      Shown only when camera is denied.
+      ═══════════════════════════════════════
+    -->
+    <canvas id="camera-grain-canvas" aria-hidden="true"></canvas>
+
+    <!--
+      ═══════════════════════════════════════
+      LAYER 3 — Dark overlay (always on)
+      ═══════════════════════════════════════
+    -->
+    <div id="camera-dark-overlay" aria-hidden="true"></div>
+
+    <!--
+      ═══════════════════════════════════════
+      LAYER 4 — App UI
+      ═══════════════════════════════════════
+    -->
+    <div id="app-root">
+        <main id="main-container"></main>
+        <div id="transition-overlay" class="hidden"></div>
+        <div id="custom-cursor"></div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+</body>
+</html>
