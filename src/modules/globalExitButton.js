@@ -1,5 +1,5 @@
 /**
- * LORE — Global Exit Button (v11)
+ * LORE — Global Exit Button (v12)
  *
  * A small, minimal × button placed in the top-right corner of every
  * main screen (scan, generation, narration, whatsapp).
@@ -24,15 +24,6 @@
  *  • "Leave" clears all State, stops all audio, navigates to splash.
  */
 
-import { State } from './state.js';
-import { FlowController } from './flowController.js';
-import { Audio } from './audio.js';
-import { AmbientSoundEngine } from './ambientSoundEngine.js';
-import { Underscore } from './underscore.js';
-import { SubtitleEngine } from './subtitles.js';
-import { Camera } from './camera.js';
-import { Transitions } from './transitions.js';
-import { navigateTo } from '../main.js';
 
 const OVERLAY_ID = 'lore-exit-overlay';
 const BTN_ID     = 'lore-exit-btn';
@@ -113,19 +104,9 @@ export const GlobalExitButton = {
         // One overlay at a time
         if (document.getElementById(OVERLAY_ID)) return;
 
-        // ── Stop all audio immediately — the moment × is tapped ──────────
-        // Audio cuts before the overlay animates in so the museum goes
-        // silent straight away, regardless of whether the visitor confirms.
-        FlowController.abortNarration();
-        Audio.stopAll().catch(() => {});
-        AmbientSoundEngine.stopNow();
-        Underscore.stopNow();
-        SubtitleEngine.stop();
-        if (State.stopWaveform) {
-            State.stopWaveform();
-            State.stopWaveform = null;
-        }
-        State.activeAudioHandle = null;
+        // Audio and narration keep playing while the overlay is visible.
+        // The character finishes speaking undisturbed until the visitor
+        // confirms "Leave the museum" — at which point a hard reload fires.
 
         const overlay = document.createElement('div');
         overlay.id = OVERLAY_ID;
@@ -252,43 +233,11 @@ export const GlobalExitButton = {
             cancelBtn.style.color = 'rgba(240,235,224,0.28)';
         });
 
-        // ── Leave ────────────────────────────────────────────────
-        confirmBtn.addEventListener('click', async () => {
-            confirmBtn.disabled = true;
-            cancelBtn.disabled  = true;
-
-            // ── 1. Unlock flow so splash can re-init cleanly ─────────────
-            FlowController.unlock();
-            FlowController.setState('IDLE');
-
-            // ── 2. Full state reset — fresh start from the very beginning ─
-            // Wipe everything: profile, artworks, narrative, runtime handles.
-            // API keys (LORE_ELEVENLABS_KEY / LORE_CLAUDE_KEY) are config —
-            // never wiped, they survive across sessions.
-            State.visitorProfile    = { name: '', gender: '' };
-            State.visitedArtworks   = [];
-            State.whatsappMessages  = [];
-            State.currentArtwork    = null;
-            State.currentNarrative  = null;
-            State.isProcessing      = false;
-            State.activeAudioHandle = null;
-            State.stopWaveform      = null;
-            localStorage.removeItem('lore_state');
-
-            // ── 3. Restore camera ─────────────────────────────────────────
-            Camera.show();
-            Camera.setOverlayOpacity(0.65);
-
-            // ── 4. Remove × button — not needed on splash ─────────────────
-            this.unmount();
-
-            // ── 5. Fade overlay out → navigate to splash ──────────────────
-            overlay.style.transition = 'opacity 0.9s ease';
-            overlay.style.opacity    = '0';
-            await delay(700);
-            overlay.remove();
-
-            await Transitions.to('splash', () => navigateTo('splash'));
+        // ── Leave — hard reload, equivalent to Ctrl+Shift+R ────────
+        // Kills ALL audio, timers, promises, and state in one shot.
+        // The browser boots the app completely fresh from the splash screen.
+        confirmBtn.addEventListener('click', () => {
+            window.location.reload();
         }, { once: true });
 
         // ── Stay ─────────────────────────────────────────────────
