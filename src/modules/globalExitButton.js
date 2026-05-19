@@ -261,10 +261,19 @@ export const GlobalExitButton = {
             FlowController.unlock();
             FlowController.setState('IDLE');
 
-            // ── 2. Reset artwork / narrative state (visitor profile kept) ─
-            State.currentArtwork   = null;
-            State.currentNarrative = null;
-            State.isProcessing     = false;
+            // ── 2. Full state reset — fresh start from the very beginning ─
+            // Wipe everything: profile, artworks, narrative, runtime handles.
+            // API keys (LORE_ELEVENLABS_KEY / LORE_CLAUDE_KEY) are config —
+            // never wiped, they survive across sessions.
+            State.visitorProfile    = { name: '', gender: '' };
+            State.visitedArtworks   = [];
+            State.whatsappMessages  = [];
+            State.currentArtwork    = null;
+            State.currentNarrative  = null;
+            State.isProcessing      = false;
+            State.activeAudioHandle = null;
+            State.stopWaveform      = null;
+            localStorage.removeItem('lore_state');
 
             // ── 3. Restore camera ─────────────────────────────────────────
             Camera.show();
