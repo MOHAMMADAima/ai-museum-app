@@ -672,7 +672,7 @@ function _removeVoiceMessage() {
 
 export const Audio = {
 
-    stopAll() {
+    async stopAll() {
         // ── 1. Abort any in-flight ElevenLabs fetch ────────────────────────
         // Must fire FIRST — before touching WebAudio nodes — so the fetch
         // rejects immediately and cannot produce an orphan handle.

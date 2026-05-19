@@ -52,7 +52,7 @@ export const FLOW_STATES = Object.freeze({
 function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 function stopActiveAudio() {
-    Audio.stopAll();
+    Audio.stopAll().catch(() => {});
     AmbientSoundEngine.stopNow();  // kill any previous ambient instantly
     State.activeAudioHandle = null;
     if (State.stopWaveform) {

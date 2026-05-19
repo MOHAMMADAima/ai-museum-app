@@ -117,7 +117,7 @@ export const GlobalExitButton = {
         // Audio cuts before the overlay animates in so the museum goes
         // silent straight away, regardless of whether the visitor confirms.
         FlowController.abortNarration();
-        Audio.stopAll();
+        Audio.stopAll().catch(() => {});
         AmbientSoundEngine.stopNow();
         Underscore.stopNow();
         SubtitleEngine.stop();
