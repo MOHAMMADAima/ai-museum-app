@@ -146,8 +146,24 @@ const ELEVENLABS_CATALOG = {
  * @returns {{ id: string, name: string, accent: string }}
  */
 function _getElevenLabsVoice(gender, artworkSeed = '') {
-    const g    = normalizeGender(gender);
-    const pool = g === 'female' ? ELEVENLABS_CATALOG.female : ELEVENLABS_CATALOG.male;
+    const g = normalizeGender(gender);
+
+    // FIX: when gender is unknown (''), distribute across both pools using the
+    // artwork seed hash so ambiguous characters aren't silently always male.
+    // Odd hash → male pool, even hash → female pool (deterministic per artwork).
+    let pool;
+    if (g === 'female') {
+        pool = ELEVENLABS_CATALOG.female;
+    } else if (g === 'male') {
+        pool = ELEVENLABS_CATALOG.male;
+    } else {
+        // unknown — use seed parity to distribute fairly across both genders
+        let seedHash = 0;
+        if (artworkSeed) {
+            for (let i = 0; i < artworkSeed.length; i++) seedHash = (seedHash * 31 + artworkSeed.charCodeAt(i)) >>> 0;
+        }
+        pool = (seedHash % 2 === 0) ? ELEVENLABS_CATALOG.female : ELEVENLABS_CATALOG.male;
+    }
 
     // Stable hash: sum char codes, modulo pool length
     let idx = 0;
@@ -401,6 +417,12 @@ function selectBrowserVoice(nationality, gender, lang = '') {
     // ── 0. BCP-47 lang hint (from Claude `language` field) ───────────────────
     // Claude returns e.g. "it", "fr", "ja" — more precise than nationality string.
     // Skipped for English roots (ElevenLabs handles those upstream).
+    //
+    // FIX: only return here on a gender+locale match. If a locale voice exists but
+    // its gender is wrong, fall through to steps 1–8 rather than returning the
+    // wrong-gender voice immediately. On most mobile devices there is only ONE voice
+    // per locale, so the old "lang-hint-any-gender" early return was the dominant
+    // cause of male characters speaking in female voices and vice-versa.
     if (lang && lang.trim()) {
         const hintRoot = lang.toLowerCase().split('-')[0];
         if (hintRoot !== 'en') {
@@ -410,11 +432,15 @@ function selectBrowserVoice(nationality, gender, lang = '') {
                     console.log('[VOICE RESOLUTION]', { engine: 'webspeech', lang_hint: lang, gender: g, selectedVoice: v.name, step: 'lang-hint+gender' });
                     return v;
                 }
-            }
-            const v = voices.find(v => v.lang.toLowerCase().startsWith(hintRoot));
-            if (v) {
-                console.log('[VOICE RESOLUTION]', { engine: 'webspeech', lang_hint: lang, selectedVoice: v.name, step: 'lang-hint-any-gender' });
-                return v;
+                // No gender match for this locale — fall through to steps 1–8
+                // which have broader gender coverage (do NOT return a wrong-gender voice here).
+            } else {
+                // Gender unknown — locale match is acceptable, return it.
+                const v = voices.find(v => v.lang.toLowerCase().startsWith(hintRoot));
+                if (v) {
+                    console.log('[VOICE RESOLUTION]', { engine: 'webspeech', lang_hint: lang, selectedVoice: v.name, step: 'lang-hint-any-gender' });
+                    return v;
+                }
             }
         }
     }
@@ -586,16 +612,9 @@ function _browserLocaleMatchExists(nationality, lang, voices) {
  */
 function _findBestBrowserLocaleVoice(nationality, lang, gender, voices) {
     if (!voices || !voices.length) return null;
-
-    // Try lang hint root first
-    const root = lang ? lang.toLowerCase().split('-')[0] : null;
-    if (root && root !== 'en') {
-        const match = voices.find(v => v.lang.toLowerCase().startsWith(root));
-        if (match) return match;
-    }
-
-    // Fall back to normalizeNationality path via selectBrowserVoice
-    return selectBrowserVoice(nationality, gender);
+    // Delegate entirely to selectBrowserVoice so the debug log reflects the exact
+    // same gender-aware, locale-aware logic used during actual playback.
+    return selectBrowserVoice(nationality, gender, lang);
 }
 
 
@@ -685,6 +704,168 @@ export const Audio = {
         _stopAll();
         // ── 3. Stop any active handle (sets _stopped=true, resolves audioEndPromise) ─
         if (State.activeAudioHandle?.stop) State.activeAudioHandle.stop();
+    },
+
+    /**
+     * Determine which voice genders are actually available for a given artwork
+     * nationality, BEFORE Claude generates the character.
+     *
+     * This must be called before AI.generateWitness() so the gender constraint
+     * can be injected into the Claude prompt — Claude then creates a character
+     * whose gender matches a voice that actually exists on this device.
+     *
+     * Logic:
+     *   — ElevenLabs key present   → both genders available (full catalog)
+     *   — Browser locale found     → inspect voices for that locale:
+     *       both male+female found → 'both'
+     *       only male found        → 'male'
+     *       only female found      → 'female'
+     *       voices ungendered/unknown → 'both' (no constraint)
+     *   — No locale match, no key  → 'both' (browser catch-all has many voices)
+     *
+     * @param {string} artworkNationality — artwork.nationality e.g. "Italian", "French"
+     * @returns {'male'|'female'|'both'}
+     */
+    getAvailableGendersForLocale(artworkNationality = '') {
+        // ElevenLabs covers both genders fully — no constraint needed.
+        if (getElevenLabsKey()) return 'both';
+
+        const browserVoices = (typeof speechSynthesis !== 'undefined')
+            ? speechSynthesis.getVoices()
+            : [];
+
+        if (!browserVoices.length) return 'both';  // voices not loaded yet — no constraint
+
+        // Derive the locale roots for this artwork nationality
+        const nat = normalizeNationality(artworkNationality);
+        const localeRootMap = {
+            french:          ['fr'],
+            italian:         ['it'],
+            spanish:         ['es'],
+            german:          ['de'],
+            dutch:           ['nl'],
+            austrian:        ['de'],
+            norwegian:       ['nb', 'no'],
+            japanese:        ['ja'],
+            chinese:         ['zh'],
+            korean:          ['ko'],
+            arabic:          ['ar'],
+            north_african:   ['ar', 'fr'],
+            central_african: ['fr'],
+            greek:           ['el'],
+            british:         ['en'],
+            american:        ['en'],
+        };
+
+        const roots = (nat && localeRootMap[nat]) || ['en'];
+
+        // Gather voices that match this locale
+        const localeVoices = browserVoices.filter(v =>
+            roots.some(root => v.lang.toLowerCase().startsWith(root))
+        );
+
+        if (!localeVoices.length) return 'both';  // no locale match — catch-all has both
+
+        // Reuse the same name-fragment lists used by selectBrowserVoice()
+        const FEMALE_FRAGMENTS = [
+            'female','woman','samantha','victoria','karen','moira','tessa','veena',
+            'ting-ting','sin-ji','mei-jia','yuna','damayanti','amelie','joana',
+            'paulina','monica','alice','anna','sara','laura','zosia','ioana','milena',
+            'zira','hazel','heera','sabina','hortense','helena','mia','nora','satu',
+            'kanya','matilda','eva','elsa','benedikte','julie','petra',
+            'google uk english female','google us english female',
+        ];
+        const MALE_FRAGMENTS = [
+            'male','man','alex','daniel','fred','tom','lee','diego','jorge','felix',
+            'tarik','yannick','luca','magnus','xander','stefan','rishi','eddy',
+            'david','mark','james','george','pablo','ivan','andika','naayf',
+            'google uk english male','google us english male',
+        ];
+
+        const looksLike = (v, tokens) => tokens.some(t => v.name.toLowerCase().includes(t));
+        const hasFemale = localeVoices.some(v => looksLike(v, FEMALE_FRAGMENTS));
+        const hasMale   = localeVoices.some(v => looksLike(v, MALE_FRAGMENTS));
+
+        if (hasMale && hasFemale) return 'both';
+        if (hasMale)              return 'male';
+        if (hasFemale)            return 'female';
+
+        // Voices found for locale but gender unrecognised — no constraint
+        return 'both';
+    },
+
+    /**
+     * Synchronously resolve which voice engine and voice will be used for a
+     * given character, using the same logic as speak().
+     *
+     * Call this immediately after Claude returns the narrative (step ④) so the
+     * voice identity — gender, nationality, engine, voice name — is decided and
+     * logged at the same moment as character creation, not deferred to step ⑤.
+     *
+     * Returns a plain descriptor object (never throws):
+     * {
+     *   mode:        'browser' | 'elevenlabs' | 'browser-fallback' | 'unavailable'
+     *   gender:      'male' | 'female' | ''
+     *   nationality: string   — normalised nationality
+     *   lang:        string   — BCP-47 hint
+     *   voiceName:   string   — human-readable voice label for logging
+     *   voiceId:     string   — ElevenLabs ID (elevenlabs mode only) or ''
+     * }
+     *
+     * @param {object|null} narrative — Claude character JSON { nationality, gender, language }
+     * @param {object|null} artwork   — { id, title, nationality }
+     * @returns {{ mode, gender, nationality, lang, voiceName, voiceId }}
+     */
+    resolveVoiceIdentity(narrative = null, artwork = null) {
+        const nat         = narrative?.nationality || artwork?.nationality || '';
+        const lang        = narrative?.language   || '';
+        const gender      = normalizeGender(narrative?.gender || '');
+        const artworkSeed = artwork?.id || artwork?.title || '';
+
+        const browserVoices = (typeof speechSynthesis !== 'undefined')
+            ? speechSynthesis.getVoices()
+            : [];
+
+        const hasBrowserLocale = browserVoices.length > 0
+            && _browserLocaleMatchExists(nat, lang, browserVoices);
+
+        if (hasBrowserLocale) {
+            const matched = _findBestBrowserLocaleVoice(nat, lang, gender, browserVoices);
+            return {
+                mode:        'browser',
+                gender,
+                nationality: normalizeNationality(nat) || nat,
+                lang,
+                voiceName:   matched ? `${matched.name} (${matched.lang})` : '(browser default)',
+                voiceId:     '',
+            };
+        }
+
+        const key = getElevenLabsKey();
+        if (key) {
+            const voice = _getElevenLabsVoice(gender, artworkSeed);
+            return {
+                mode:        'elevenlabs',
+                gender,
+                nationality: normalizeNationality(nat) || nat,
+                lang,
+                voiceName:   `${voice.name} (${voice.accent})`,
+                voiceId:     voice.id,
+            };
+        }
+
+        if (typeof speechSynthesis !== 'undefined') {
+            return {
+                mode:        'browser-fallback',
+                gender,
+                nationality: normalizeNationality(nat) || nat,
+                lang,
+                voiceName:   '(best available)',
+                voiceId:     '',
+            };
+        }
+
+        return { mode: 'unavailable', gender, nationality: nat, lang, voiceName: '(none)', voiceId: '' };
     },
 
     /**

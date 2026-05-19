@@ -50,11 +50,12 @@ export const AI = {
     /**
      * Build the Claude message payload for witness generation.
      *
-     * @param {object} artwork  — { title, artist, year, nationality, hasMetadata, snapshot? }
-     * @param {object} visitor  — { name, gender }
+     * @param {object} artwork          — { title, artist, year, nationality, hasMetadata, snapshot? }
+     * @param {object} visitor          — { name, gender }
+     * @param {string} genderConstraint — 'male' | 'female' | 'both' (from Audio.getAvailableGendersForLocale)
      * @returns {{ messages: array, systemPrompt: string }}
      */
-    buildPrompt(artwork, visitor) {
+    buildPrompt(artwork, visitor, genderConstraint = 'both') {
         const hasMetadata = artwork.hasMetadata && (artwork.title || artwork.artist || artwork.year);
         const visitorName = visitor.name || 'Visitor';
         const snapshot    = artwork.snapshot    || null;
@@ -74,7 +75,7 @@ Return ONLY a valid JSON object. No prose before or after. No markdown fences.
   "yearLabel": "Year as a string (e.g. '1793', '1513')",
   "nationality": "Character's cultural/national origin — single word or two words, title-case. Drives narrative style and language fragments. Examples: 'French', 'Italian', 'Spanish', 'German', 'British', 'American', 'Dutch', 'Chinese', 'Japanese', 'Arabic', 'North African', 'Central African'",
   "language": "BCP-47 language code for the character's native tongue. Used to select a REAL browser voice with the correct accent. Examples: 'it' (Italian), 'fr' (French), 'de' (German), 'es' (Spanish), 'ja' (Japanese), 'zh' (Chinese), 'ko' (Korean), 'ar' (Arabic), 'nl' (Dutch), 'en' (English — British or American). MUST match nationality. Never invent a code.",
-  "gender": "Character's gender — exactly one of: 'male', 'female', 'unknown'",
+  "gender": "${genderConstraint === 'male' ? 'MUST be exactly: male — voice engine has ONLY male voices available on this device. Any other value will cause a voice mismatch.' : genderConstraint === 'female' ? 'MUST be exactly: female — voice engine has ONLY female voices available on this device. Any other value will cause a voice mismatch.' : 'Character\'s gender — exactly one of: \'male\', \'female\', \'unknown\''}",
   "traits": ["adjective1", "adjective2", "adjective3"],
   "emotionalState": "One phrase: their dominant inner condition (e.g. 'consumed by a grief she cannot name', 'obsessed with a detail no one else noticed')",
   "characterBio": "One sentence: who they were and their connection to this artwork.",
@@ -241,6 +242,15 @@ ABSOLUTELY FORBIDDEN:
 
 "gender" must be exactly: "male", "female", or "unknown".
 NEVER leave blank. ALWAYS derive from the character's identity.
+${genderConstraint === 'male' ? `
+CRITICAL VOICE CONSTRAINT — MANDATORY:
+The voice engine has detected that ONLY MALE voices are available on this device.
+"gender" MUST be "male". Creating a female character will produce a voice mismatch.
+Design a historically believable MALE character for this artwork.` : genderConstraint === 'female' ? `
+CRITICAL VOICE CONSTRAINT — MANDATORY:
+The voice engine has detected that ONLY FEMALE voices are available on this device.
+"gender" MUST be "female". Creating a male character will produce a voice mismatch.
+Design a historically believable FEMALE character for this artwork.` : ''}
 
 ═══════════════════════════════════════════════════════
 NARRATIVE RULES — CRITICAL
@@ -504,12 +514,112 @@ ${outputSpec}`
         return { messages: [{ role: 'user', content: userContent }], systemPrompt };
     },
 
-    async generateWitness(artwork, visitor) {
-        console.log(`[AI] generateWitness — hasMetadata: ${artwork.hasMetadata}, hasSnapshot: ${!!artwork.snapshot}, visitor: "${visitor.name}"`);
+    /**
+     * Fast micro-call to Claude that resolves ONLY the character's nationality
+     * and language — before the full witness generation.
+     *
+     * This is deliberately tiny (max_tokens: 30) so it adds minimal latency.
+     * The result feeds Audio.getAvailableGendersForLocale(), which constrains
+     * the gender Claude is allowed to use in the full generation call.
+     *
+     * Order of operations enforced by flowController:
+     *   ① resolveCharacterNationality()  ← this method
+     *   ② Audio.getAvailableGendersForLocale(nationality)
+     *   ③ generateWitness(..., genderConstraint)
+     *
+     * Falls back to artwork.nationality if Claude is unavailable or fails.
+     *
+     * @param {object} artwork  — { title, artist, year, nationality, snapshot? }
+     * @param {object} visitor  — { name }
+     * @returns {Promise<{ nationality: string, language: string }>}
+     */
+    async resolveCharacterNationality(artwork, visitor) {
+        const fallback = {
+            nationality: artwork.nationality || 'Italian',
+            language:    '',
+        };
+
+        if (!getClaudeKey()) {
+            console.warn('[AI] resolveCharacterNationality — no Claude key, using artwork nationality fallback:', fallback.nationality);
+            return fallback;
+        }
+
+        try {
+            const hasMetadata = artwork.hasMetadata && (artwork.title || artwork.artist);
+            const titleStr    = artwork.title  ? `"${artwork.title}"` : null;
+            const artistStr   = artwork.artist ? `by ${artwork.artist}` : null;
+            const snapshot    = artwork.snapshot || null;
+
+            const artworkDesc = hasMetadata
+                ? [titleStr, artistStr, artwork.year ? `(${artwork.year})` : null].filter(Boolean).join(' ')
+                : 'an artwork of unknown title and artist';
+
+            // Probe prompt: only asks for the character's nationality + language.
+            // Same logic as the full prompt's STEP 3 — nationality from the CHARACTER, not the artwork.
+            const probeSystem = `You are a character nationality resolver for LORE, an emotional art experience.
+Given an artwork, determine the cultural nationality and BCP-47 language code for the most
+historically appropriate character witness. Output ONLY valid JSON — no prose, no fences.
+Format exactly: {"nationality":"Italian","language":"it"}
+Derive nationality from the CHARACTER, not the artwork (e.g. a French archivist studying an
+Italian painting → nationality "French"). Default to Italian if origin is ambiguous.`;
+
+            const userContent = [
+                snapshot ? {
+                    type:   'image',
+                    source: {
+                        type:       'base64',
+                        media_type: 'image/jpeg',
+                        data:       snapshot.replace(/^data:image\/\w+;base64,/, ''),
+                    }
+                } : null,
+                {
+                    type: 'text',
+                    text: `Artwork: ${artworkDesc}.\nVisitor: ${visitor.name || 'Visitor'}.\nReturn ONLY the JSON object — nothing else.`,
+                },
+            ].filter(Boolean);
+
+            const response = await fetch(CLAUDE_ENDPOINT, {
+                method: 'POST',
+                headers: {
+                    'Content-Type':  'application/json',
+                    'x-api-key':     getClaudeKey(),
+                    'anthropic-version': '2023-06-01',
+                    'anthropic-dangerous-direct-browser-access': 'true',
+                },
+                body: JSON.stringify({
+                    model:      'claude-opus-4-5',
+                    max_tokens: 30,
+                    system:     probeSystem,
+                    messages:   [{ role: 'user', content: userContent }],
+                }),
+            });
+
+            if (!response.ok) throw new Error(`probe HTTP ${response.status}`);
+
+            const data  = await response.json();
+            const raw   = data.content?.[0]?.text?.trim() || '';
+            const match = raw.match(/\{[\s\S]*?\}/);
+            if (!match) throw new Error('no JSON in probe response');
+
+            const parsed      = JSON.parse(match[0]);
+            const nationality = (typeof parsed.nationality === 'string' && parsed.nationality.trim()) ? parsed.nationality.trim() : fallback.nationality;
+            const language    = (typeof parsed.language    === 'string' && parsed.language.trim())    ? parsed.language.trim().toLowerCase() : '';
+
+            console.log('[AI] resolveCharacterNationality →', { nationality, language });
+            return { nationality, language };
+
+        } catch (err) {
+            console.warn('[AI] resolveCharacterNationality failed, using fallback:', err.message);
+            return fallback;
+        }
+    },
+
+    async generateWitness(artwork, visitor, genderConstraint = 'both') {
+        console.log(`[AI] generateWitness — hasMetadata: ${artwork.hasMetadata}, hasSnapshot: ${!!artwork.snapshot}, visitor: "${visitor.name}", genderConstraint: ${genderConstraint}`);
 
         if (getClaudeKey()) {
             try {
-                return await this.fetchFromClaude(artwork, visitor);
+                return await this.fetchFromClaude(artwork, visitor, genderConstraint);
             } catch (err) {
                 console.error('[AI] Claude fetch failed — falling back to simulation:', err.message);
             }
@@ -519,8 +629,8 @@ ${outputSpec}`
         return this.simulateResponse(artwork, visitor);
     },
 
-    async fetchFromClaude(artwork, visitor) {
-        const { messages, systemPrompt } = this.buildPrompt(artwork, visitor);
+    async fetchFromClaude(artwork, visitor, genderConstraint = 'both') {
+        const { messages, systemPrompt } = this.buildPrompt(artwork, visitor, genderConstraint);
 
         console.log('[AI] Sending to Claude — model: claude-opus-4-5');
 

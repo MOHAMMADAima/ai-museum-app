@@ -233,10 +233,40 @@ export const FlowController = {
             // ③ Ambient aura begins immediately
             AmbientSoundEngine.start(artwork);
 
-            // ④ AI witness generation
+            // ④ AI witness generation — three ordered steps:
+            //
+            //   ④a  Micro-call: Claude resolves character nationality only (~30 tokens, fast).
+            //       The character's nationality may differ from the artwork's nationality
+            //       (e.g. a French archivist studying an Italian painting → "French").
+            //
+            //   ④b  Voice gender check: inspect browser voices for THAT nationality's
+            //       locale to determine which genders are actually available on this device.
+            //
+            //   ④c  Full generation: Claude generates the complete character, constrained
+            //       to the gender(s) that have a real voice on this device.
+            //
+            // This guarantees: character gender ↔ voice gender always match.
+
+            // ── STEP ④a — resolve character nationality ────────────────────
             this.setState(FLOW_STATES.GENERATING_CHARACTER);
-            console.log('[Flow] Claude generation started');
-            const narrative = await AI.generateWitness(artwork, State.visitorProfile);
+            console.log('[Flow] ④a Resolving character nationality...');
+            const { nationality: charNationality } = await AI.resolveCharacterNationality(artwork, State.visitorProfile);
+
+            // ── ABORT GUARD ④a ────────────────────────────────────────────
+            if (aborted()) {
+                console.log('[EXIT ABORT] nationality probe aborted.');
+                this.unlock();
+                this.setState(FLOW_STATES.IDLE);
+                return;
+            }
+
+            // ── STEP ④b — gender constraint from character's locale ────────
+            const genderConstraint = Audio.getAvailableGendersForLocale(charNationality);
+            console.log('[Flow] ④b Voice gender constraint:', genderConstraint, '(character nationality:', charNationality, ')');
+
+            // ── STEP ④c — full character generation ───────────────────────
+            console.log('[Flow] ④c Claude full character generation started');
+            const narrative = await AI.generateWitness(artwork, State.visitorProfile, genderConstraint);
             State.currentNarrative = narrative;
 
             // ── ABORT GUARD ④ ─────────────────────────────────────────────────
@@ -259,9 +289,25 @@ export const FlowController = {
                 throw new Error('narrative.narrative field is missing from AI response.');
             }
 
-            // ⑤ Voice synthesis — pass narrative so character nationality+gender drive voice selection
+            // ④b Voice identity resolved immediately after character creation.
+            // Gender and nationality are known now — resolve which engine and
+            // voice WILL be used before entering the synthesis step, so the
+            // decision is logged alongside the character, not deferred silently.
+            const voiceIdentity = Audio.resolveVoiceIdentity(narrative, artwork);
+            console.log('[CHARACTER + VOICE]', {
+                name:        narrative.characterName,
+                nationality: narrative.nationality,
+                gender:      narrative.gender,          // raw value from Claude
+                voiceGender: voiceIdentity.gender || '(unknown)',
+                voiceMode:   voiceIdentity.mode,
+                voice:       voiceIdentity.voiceName,
+                lang:        narrative.language || '(none)',
+            });
+
+            // ⑤ Voice synthesis — narrative carries nationality+gender, voiceIdentity
+            // confirms the engine+voice already decided above.
             this.setState(FLOW_STATES.GENERATING_VOICE);
-            console.log('[Flow] ElevenLabs generation started');
+            console.log('[Flow] Voice synthesis started — engine:', voiceIdentity.mode);
             const audioHandle = await Audio.speak(narrative.narrative, artwork, narrative);
 
             // ── ABORT GUARD ⑤ ─────────────────────────────────────────────────
