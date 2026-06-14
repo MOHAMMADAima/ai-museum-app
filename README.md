@@ -62,6 +62,8 @@ At that moment, the technology disappears.
 Only the story remains.
 
 ## Tech Stack
+
+```bash
 Frontend :
 HTML5
 CSS3
@@ -81,32 +83,7 @@ Real-time narrative generation
 Emotion-driven prompt engineering
 Dynamic character creation per artwork
 Multilingual, personality-based dialogue system
-
-
-Using conversational channels (e.g. messaging apps), users can keep interacting with the characters they met in the museum.
-
-Each character retains:
-
-personality
-emotional tone
-memories of the artwork
-narrative continuity
-This turns a single museum visit into an ongoing cultural conversation.
-
-## Vision
-LORE is not just a museum app.
-
-It is an experiment in emotionally immersive storytelling.
-
-A future where:
-
-artworks speak
-history becomes conversational
-museums feel alive
-culture becomes personal again
-Because sometimes, all it takes is one voice…
-
-to transform a painting into a memory.
+```
 
 ## Demo
 
