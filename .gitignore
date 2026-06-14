@@ -28,3 +28,19 @@ package-lock.json
 history/*.json
 .vite_cache
 .env
+
+
+# Environment
+.env
+.env.local
+.env.production
+
+# Dependencies
+node_modules/
+
+# Build files
+dist/
+build/
+.next/
+
+
